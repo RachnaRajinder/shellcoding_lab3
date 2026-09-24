@@ -370,6 +370,9 @@ When the return address gets overwritten, and the function finishes, the ret ins
 The overflow was confirmed when 80 bytes of the letter 'A' (which is 0x41 in hexadecimal) were written into the buffer. This completely overwrote both the base pointer (rbp) and the return address with the same 'A' pattern (0x4141414141414141). When I stepped through the ret instruction, it caused a segmentation fault (SIGSEGV), which means the program tried to jump to an invalid memory location. The backtrace showed that the program was trying to return to the address 0x4141414141414141, which was controlled by the attacker. This proves that the attacker was able to directly control the instruction pointer, and the program tried to execute code at the address the attacker set, leading to the crash.
 **Provide a screenshot when the overflow occurs and one byte from your input reaches the instruction pointer register.**
 
+<img width="1497" height="442" alt="CS3_Week3_overflow" src="https://github.com/user-attachments/assets/6dca8659-3933-40fc-869f-36c00a8e96d5" />
+
+
 ### B) Adding hidden (non-used) function to the previous program. (And still executing it)
 
 Let's add a new function to the previously used program, but never actually use it.
@@ -447,6 +450,7 @@ Sure! Here's a student-friendly version of that explanation:
 Using gdb, to find the address of the hidden function called `secret`, which was at 0x401176. From analysis in Task 1, I learned that the buffer in the program is located at `rbp-0x20`, which means I need to write 40 bytes of padding to reach the saved base pointer. After those 40 bytes, the next 8 bytes will overwrite the saved return address. Since x86-64 is little-endian, I have to write the address of `secret()` in reverse byte order into those 8 bytes. When I do that, the `ret` instruction at the end of the `stackoverflow()` function will jump directly to `secret()` instead of returning to `main()`. This way, I can control the program’s flow and make it execute the hidden function.
 
 > ***3. Take a screenshot when you manage to execute the function.***
+<img width="954" height="379" alt="CS3_Week3_task2_2" src="https://github.com/user-attachments/assets/2fade08a-778a-43fe-99ba-cac07e2bced9" />
 
 
 Tip: If your hidden function contains printing - add a newline ending to the string.
@@ -510,6 +514,10 @@ if __name__ == "__main__":
 Getting used to `pwntools` at this point will help with the following tasks.
 
 > ***Return a screenshot when you manage to execute the "secret" function by using `pwntools` and also return your Python source code.***
+<img width="952" height="737" alt="CS_week3_task_C" src="https://github.com/user-attachments/assets/e88dc6d2-7eee-483d-b9b8-cb83cf086096" />
+<img width="962" height="690" alt="CS_week3_task_Cc" src="https://github.com/user-attachments/assets/a69aa30a-6af9-4ff4-a7dd-6b7481cf2d67" />
+
+
 ---
 Task 2: Arbitrary code execution
 ---
@@ -649,6 +657,11 @@ void main()
 Compile the test program with the correct compiler flags and run the shellcode.
 
 > ***Provide the commands for compiling the program, the source code of the test C program with shellcode, and a screenshot when you successfully open a shell by executing the shellcode.***
+compile command used:gcc -m32 -fno-stack-protector -z execstack -o shellcode_test shellcode_test.c
+The source code has the shellcode array declared inside main() (on the stack, not globally).  
+I also have a screenshot showing the output of the ps command, where you can see a new sh process started by the shellcode I ran.
+<img width="962" height="485" alt="CS_week3_task_paylod" src="https://github.com/user-attachments/assets/54c997b0-40ab-41e8-9de0-8920959e2086" />
+<img width="1517" height="470" alt="CS_week3_task_payload_nanofile" src="https://github.com/user-attachments/assets/b1fd00e1-b06f-4a36-8572-ceae535c4f0e" />
 
 ## B) Executing the payload in another program
 
@@ -680,8 +693,21 @@ flowchart LR
 Consult the previously mentioned materials if you get in trouble.
 
 > ***1. At first, you need to open shell by executing the shellcode in the provided sample program, inside `gdb`. Adjust the padding, find the correct memory address and run the shellcode! Provide the command and screenshot when it succeeds. Explain how you obtained the memory address and the logic of your command.***
+To find the correct memory address, I set a breakpoint in gdb after the strcpy call and used the command x/40xb $ebp-0x1c to look at the runtime memory layout of the buffer for my payload size. This helped me see exactly where my padding ended and where the return address was located, since the address can shift a bit depending on the argument length.  
+I placed my shellcode after the return address (not before), so that when the ret instruction runs, the stack pointer (esp) ends up just past the overwritten return address. This way, the push instructions in my shellcode won't overwrite my own code.  
+I used 32 bytes of padding: 28 bytes to fill the buffer plus 4 bytes for the saved ebp. Then, I added 4 bytes for the return address (0xffffcc30), which points to the start of an 8-byte NOP sled. The NOP sled helps tolerate small inaccuracies in the address.  
+When I ran this payload in gdb, the return instruction jumped into the NOP sled, then slid into the shellcode, which executed execve("/bin/sh", NULL, NULL). GDB confirmed this by showing: 'process 6668 is executing new program: /usr/bin/dash'.
+<img width="1182" height="820" alt="CS_week3_payload-taskb_q1" src="https://github.com/user-attachments/assets/bad70e15-272c-4c34-8f82-5c7802b9b671" />
+ 
 
 > ***2. Secondly, let's run the same shellcode with `pwntools`, outside of the debugger. You must brute force the address. However, it should be quite near the one you had in `gdb`. Return your code and screenshot of success. Briefly explain what you had to do.***
+When I ran the exploit outside of gdb, using pwntools to spawn the process, the stack was shifted slightly compared to running inside the debugger. Because of this, the exact address I found earlier (0xffffcc30) didn’t work perfectly anymore. Instead of guessing blindly, I brute-forced a range of about ±500 bytes around that address, stepping by 4 bytes each time since addresses are 4-byte aligned on 32-bit systems.  
+For each address, I started a new process with the payload, sent a unique marker string, and checked if it was echoed back — which would mean the shell was successfully spawned. I also increased the size of the NOP sled from 8 to 20 bytes to give more room for small inaccuracies in the address.  
+This brute-force approach worked, and I found a valid address at 0xffffcba0. I then ran whoami and id in the shell, which confirmed I had a real, interactive shell.
+<img width="947" height="805" alt="pwn1" src="https://github.com/user-attachments/assets/548f2c83-4b19-4271-a4be-fc4ef6581ea9" />
+<img width="945" height="501" alt="pwn2" src="https://github.com/user-attachments/assets/3eaaf3b9-1337-4229-97c3-21889b79c022" />
+
+
 
 Make sure to disable ASLR, and remember to operate with raw bytes instead of encoded strings e.g. use the following instead of `print`, when using python3 to generate payloads:
 ```bash
@@ -723,6 +749,15 @@ One very common library is **libc** (which probably named this method 'ret2libc'
 If we somehow pass the correct argument to the system() function, the code isn't executed in the stack, it's executed in the address of system(). This was one of the earliest methods to bypass NX protection.
 
 > ***In this task, you should make an example implementation of this ret2libc method. It could be for example spawning a local shell. This time, **do not** disable NX protection (do not use -z execstack flag in compiler). Disabling other protections is still required. Like previously, make a step by step report(what, why, how) including possible source files and command line commands which lead you to get shell access.***
+I learned that a ret2libc attack allows you to exploit a buffer overflow without having to inject any new code, which is really useful because it helps get around NX (No-eXecute) protection.  
+This time I compiled the vulnerable program without the -z execstack flag, so NX was still enabled — meaning I couldn't run code on the stack like I did earlier with shellcode. I also disabled the stack canary and PIE to keep the memory layout predictable, so the addresses I found would stay the same.  
+Since I couldn’t run my own code on the stack anymore, I had to reuse existing code that was already allowed to run, specifically the system() function from libc. Using GDB, I found its address at 0xf7dc7ce0. I also looked through libc’s memory for a string "/bin/sh" (libc already has this internally), and I found it at 0xf7f3f167. So I didn’t need to inject that string myself.  
+Next, I built my payload: 32 bytes of padding to fill the buffer and reach the saved return address, then the address of system() (which becomes the new return address), a fake 4-byte value as a dummy "return from system" address, and finally the address of the "/bin/sh" string. When system() is called, it executes "/bin/sh" and gives me a shell.  
+When I ran the payload, the return address got redirected to system("/bin/sh"), and I got a real shell — I confirmed by running whoami and id inside it. After I exited the shell, the program crashed with a segfault at 0x42424242, which was the dummy return address I used. Seeing it crash there confirmed that my payload was set up correctly.  
+This showed me that even if NX is enabled, an attacker doesn’t need to inject new code — they just need to redirect execution to code that’s already trusted and present in memory.
+<img width="955" height="407" alt="Return-to-libc" src="https://github.com/user-attachments/assets/c85b2387-ef4a-4d87-964c-8ea5a0a3bd8e" />
+<img width="951" height="407" alt="address-discovery process" src="https://github.com/user-attachments/assets/5c599202-391f-47af-9113-138ed98a97b9" />
+
 
 To be noted:
 * You should check if ASCII Armoring is present in your system. If null bytes are present in `system` function, it is enough to describe how you could have done the task.
@@ -768,6 +803,37 @@ Simple, but practical demonstration of the ROP technique can be found [here](htt
 Extra: The white paper introducing the ROP can be found here [^18].
 
 > ***Try to get previously mentioned example (ROP_hello) [here](src/ROP_hello.py) to work by yourself. Next, make simple example implementation of ROP technique. This could be spawning a local shell for example. To not make it same as ret2libc method, print some text before spawning shell, and print also something after exiting the shell. In this way we can apply some ROP - chain.***
+I used the provided ROP_hello.py script and found the important addresses in the program using GDB and ROPgadget:
+
+The address for putchar() was 0xf7df4390  
+The address for exit() was 0xf7db32b0  
+The gadget pop ebx; ret was found at offset 0x000256cc in libc, and with the libc's base address (0xf7d73000), the full address is 0xf7d986cc
+
+I put these addresses into the script, fixed the target program's path, and ran it. It worked! The program printed "Hello, world!" and then exited cleanly. (screenshot.)
+
+I filled these into the script's placeholder variables, fixed the target binary path, and ran it. The output confirmed the ROP chain worked: it printed "Hello, world!" by chaining repeated putchar() calls together via the pop ebx; ret gadget, then called exit() to terminate cleanly. (See screenshot.)
+
+Making a chain that prints a message, opens a shell, and then prints another message:
+I tried to make a new script that does three things in one chain:
+
+Prints a message using putchar()  
+Opens a shell with system("/bin/sh")  
+Prints another message
+
+Each of these parts worked when I tested them separately printing messages and opening a shell. But when I combined everything into one chain, it became unstable and often crashed.
+While debugging in GDB, I got two problems:
+
+Overwriting EBX Register:The gadget pop ebx; ret used to move between putchar() calls kept overwriting the EBX register. In glibc (the C library), EBX is used internally for important things, like the Global Offset Table (GOT). Overwriting it caused glibc to crash.
+
+Stack Alignment Issue:When I switched to a safer gadget that only adjusts the stack (add esp, 4; ret), the printing worked fine. But then, when it tried to call system("/bin/sh"), it crashed again. This was probably because the stack was not aligned properly, which is necessary for the program to run functions correctly.
+
+In simple words:
+First chain worked b/c used right addresses to print a  message nad exit.
+Tried to add more steps print msg, open shell, print msg again, it caused crashes.
+Crash happened b/c some registers got overwritten or stack was not setup properly.
+
+<img width="961" height="465" alt="ROP_hello" src="https://github.com/user-attachments/assets/db7cfe17-12e3-4b2f-a92a-9b2ae0892a16" />
+
 
 Tip: If you are being bit unlucky, and are facing some function addresses containing null bytes in non-Ascii-Armored system, try out some alternative functions. For example, `putchar` function has `putchar_unlocked` alternative.
 
@@ -813,6 +879,13 @@ Your objective is to:
    * Use libc database, such as https://libc.blukat.me/
 5. Compute your desired libc function (or gadget address) using that information
 6. Create a ROP chain that opens a local shell using e.g., system or execve
+
+I found the buffer overflow in the read_line() function and built a ROP chain to leak the real runtime address of puts() by calling puts() on its own .got.plt entry. After this, the program looped back to the input handler instead of crashing, which was helpful. Once I got the leak, I calculated the libc base address (which was 0xf7c8e000 in one successful run) and used known offsets from objdump -T and strings -t x on the exact libc file to find the real addresses of system() and the "/bin/sh" string for that run.  
+I tried to chain a second overflow to actually call system("/bin/sh"), but I wasn’t able to do it reliably. The second-stage payload caused crashes or broken pipes, probably because of timing issues or the stack state when trying to re-trigger the vulnerable function within the same process. Given more time, I’d want to use GDB to trace the exact stack and register state at the moment of the second return, similar to what I did in Task 3B, to understand what’s going wrong and fix the chain.
+
+<img width="946" height="262" alt="task4" src="https://github.com/user-attachments/assets/c8ba304b-cbc6-43a2-97a4-430632973c10" />
+
+
 
 See [task4.c](./src/vuln_progs/task4.c) for the vulnerable program source code.
 The 32-bit binary is in [prog_bin/](./prog_bin). The binary was compiled using:
