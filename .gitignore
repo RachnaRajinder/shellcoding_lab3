@@ -1,0 +1,5 @@
+venv/
+core.*
+__pycache__/
+*.pycvenv
+overflow
